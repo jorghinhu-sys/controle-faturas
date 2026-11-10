@@ -430,16 +430,16 @@ function receiptPrompt(){
 function cardOptions(selected){ return S.cards.map(function(c){ return '<option value="'+esc(c.id)+'"'+(c.id===selected?' selected':'')+'>'+esc(c.name)+(c.last4?' · '+esc(c.last4):'')+'</option>'; }).join(''); }
 function openForm(id){
   var it=id?S.items.filter(function(x){return x.id===id;})[0]:null, isNew=!it;
-  var c0=it?it.c:cid, dt=it?it.dt:todayIso(), t=it?it.t:1, f=it?it.f:invoiceFor(dt,c0), v=it?String(it.v).replace('.',','):'';
+  var c0=it?it.c:cid, dt=it?it.dt:todayIso(), t=it?it.t:1, f=it?it.f:invoiceFor(dt,c0), v=it?(Math.round(it.v*it.t*100)/100).toFixed(2).replace('.',','):'';
   var h='<h3>'+(isNew?'Nova compra':'Editar lançamento')+'</h3>';
   if(isNew) h+='<div class="photobox hide" id="fPhotoBox"><button class="btn" id="fPhotoBtn" type="button">Ler nota por foto (opcional)</button><input id="fPhoto" class="hide" type="file" accept="image/*"><p class="note" id="fPhotoMsg">Tire uma foto da nota ou do comprovante. O Claude lê e preenche os campos para você conferir. O app não guarda a foto.</p></div>';
   if(S.cards.length>1) h+='<div class="field"><label for="fC">Cartão</label><select id="fC">'+cardOptions(c0)+'</select></div>';
   h+='<div class="field"><label for="fD">Descrição</label><input id="fD" type="text" maxlength="120" autocomplete="off" value="'+esc(it?it.d:'')+'"></div>';
-  h+='<div class="two"><div class="field"><label for="fV">Valor da parcela (R$)</label><input id="fV" type="text" inputmode="decimal" placeholder="0,00" value="'+esc(v)+'"></div>';
+  h+='<div class="two"><div class="field"><label for="fV">Valor total da compra (R$)</label><input id="fV" type="text" inputmode="decimal" placeholder="0,00" value="'+esc(v)+'"></div>';
   h+='<div class="field"><label for="fT">Nº de parcelas</label><input id="fT" type="number" inputmode="numeric" min="1" max="120" value="'+t+'"></div></div>';
   h+='<div class="two"><div class="field"><label for="fDt">Data da compra</label><input id="fDt" type="date" value="'+dt+'"></div>';
   h+='<div class="field"><label for="fF">1ª parcela na fatura de</label><select id="fF">'+monthOptions(f,f)+'</select></div></div>';
-  h+='<p class="note" id="fHint"></p><p class="note" id="fLimit"></p><p class="note err hide" id="fErr"></p>';
+  h+='<p class="note" id="fHint"></p><p class="note" id="fPar"></p><p class="note" id="fLimit"></p><p class="note err hide" id="fErr"></p>';
   h+='<div class="actions"><button class="btn" id="fCancel" type="button">Cancelar</button><button class="btn primary" id="fSave" type="button">Salvar</button></div>';
   if(!isNew) h+='<button class="btn danger block" id="fDel" type="button">Excluir lançamento</button>';
   openSheet(h);
@@ -448,9 +448,10 @@ function openForm(id){
   function hint(){
     var tt=Math.round(+$('fT').value)||1, ff=$('fF').value, last=mk(mi(ff)+tt-1);
     $('fHint').textContent = tt>1 ? ('Aparece de '+mlab(ff)+' a '+mlab(last)+' ('+tt+' faturas).') : ('Aparece só na fatura de '+mlab(ff)+'.');
-    var L=$('fLimit'), cd=card(curCard()), val=parseMoney($('fV').value);
+    var L=$('fLimit'), cd=card(curCard()), val=parseMoney($('fV').value), pe=$('fPar');
+    if(val>0){ var pv=Math.round(val/tt*100)/100; pe.textContent=tt>1?(tt+'x de '+brl(pv)+(Math.abs(pv*tt-val)>0.004?' (ajuste de centavos na soma)':'')):''; } else { pe.textContent=''; }
     if(isNew && cd.limit>0 && val>0){
-      var after=Math.round((limitInfo(cd.id).avail-val*tt)*100)/100;
+      var after=Math.round((limitInfo(cd.id).avail-Math.round(val/tt*100)/100*tt)*100)/100;
       if(after<0){ L.textContent='Esta compra passa do limite em '+brl(-after)+'.'; L.className='note err'; }
       else { L.textContent='Depois desta compra, o limite disponível fica em '+brl(after)+'.'; L.className='note'; }
     } else { L.textContent=''; }
@@ -478,7 +479,7 @@ function openForm(id){
           var name=(r&&typeof r.estabelecimento==='string')?r.estabelecimento.trim().slice(0,60):'';
           var tt=Math.round(+(r&&r.parcelas)); if(!(tt>=1&&tt<=120)) tt=1;
           var total=+(r&&r.total), vp=+(r&&r.valor_parcela), val=NaN, how='';
-          if(vp>0){ val=vp; } else if(total>0){ val=Math.round(total/tt*100)/100; if(tt>1) how=' O valor da parcela foi calculado dividindo o total.'; }
+          if(total>0){ val=total; } else if(vp>0){ val=Math.round(vp*tt*100)/100; if(tt>1) how=' O total foi calculado multiplicando a parcela.'; }
           var dt=(r&&typeof r.data==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(r.data))?r.data:'';
           if(dt){ var dd=new Date(dt+'T12:00:00'), now=new Date(); if(isNaN(dd)||dd>new Date(now.getTime()+864e5)||dd<new Date(now.getTime()-1826*864e5)) dt=''; }
           var miss=[];
@@ -503,11 +504,12 @@ function openForm(id){
   $('fCancel').addEventListener('click',closeSheet);
   $('fSave').addEventListener('click',function(){
     var d=$('fD').value.trim(), val=parseMoney($('fV').value), tt=Math.round(+$('fT').value), dd=$('fDt').value, ff=$('fF').value, err='';
-    if(!d) err='Escreva a descrição.'; else if(!(val>0)) err='Informe o valor da parcela, por exemplo 49,90.'; else if(!(tt>=1&&tt<=120)) err='O número de parcelas deve ficar entre 1 e 120.'; else if(!dd) err='Escolha a data da compra.';
+    if(!d) err='Escreva a descrição.'; else if(!(val>0)) err='Informe o valor total da compra, por exemplo 149,90.'; else if(!(tt>=1&&tt<=120)) err='O número de parcelas deve ficar entre 1 e 120.'; else if(!dd) err='Escolha a data da compra.';
     if(err){ var e=$('fErr'); e.textContent=err; e.classList.remove('hide'); return; }
     var cc=curCard();
-    if(it){ it.d=d; it.v=val; it.t=tt; it.dt=dd; it.f=ff; it.c=cc; }
-    else S.items.push({id:'i'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),c:cc,d:d,v:val,t:tt,f:ff,dt:dd});
+    var pv=Math.round(val/tt*100)/100;
+    if(it){ it.d=d; it.v=pv; it.t=tt; it.dt=dd; it.f=ff; it.c=cc; }
+    else S.items.push({id:'i'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),c:cc,d:d,v:pv,t:tt,f:ff,dt:dd});
     var tid=it?it.id:S.items[S.items.length-1].id; if(loadingDb) touched[tid]=1;
     cid=cc; sel=ff;
     closeSheet(); renderAll(); queueSave(); toast(isNew?'Compra adicionada.':'Lançamento atualizado.');

@@ -1,6 +1,6 @@
 /* Service worker: guarda o app no aparelho para abrir sem internet.
    Troque VERSION a cada publicação para o celular pegar a versão nova. */
-var VERSION = 'faturas-v2';
+var VERSION = 'faturas-v3';
 var FILES = ['./', 'index.html', 'manifest.webmanifest', 'icon-180.png', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png'];
 self.addEventListener('install', function(e){
   e.waitUntil(caches.open(VERSION).then(function(c){ return c.addAll(FILES); }).then(function(){ return self.skipWaiting(); }));
